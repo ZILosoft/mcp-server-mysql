@@ -70,11 +70,16 @@ A Model Context Protocol server that provides access to MySQL databases through 
 > from this fork. To get the hardened build, install `@zilosoft/mcp-server-mysql`
 > via npm/pnpm as shown in the other sections.
 
-### Using Smithery (upstream only — no security fixes)
+### Using Smithery
+
+> ⚠️ **Upstream only — this Smithery install does NOT include the security fixes from this fork.**
+> To get the hardened build, install `@zilosoft/mcp-server-mysql` via npm/pnpm as shown in the sections below.
 
 There are several ways to install and configure the MCP server but the most common would be checking this website [https://smithery.ai/server/@benborla29/mcp-server-mysql](https://smithery.ai/server/@benborla29/mcp-server-mysql)
 
-### Cursor (upstream only — no security fixes)
+### Cursor
+
+> ⚠️ **Upstream only — this Cursor install does NOT include the security fixes from this fork.**
 
 For Cursor IDE, you can install this MCP server with the following command in your project:
 
