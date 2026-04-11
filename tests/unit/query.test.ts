@@ -1,14 +1,27 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
+
+// Set env vars BEFORE the dist modules load. Imports are hoisted, so we use
+// vi.hoisted() to run this block before the imports resolve. This is required
+// because src/config/index.ts reads env vars once at module load into top-level
+// const exports — vi.stubEnv AFTER import would be too late.
+vi.hoisted(() => {
+  // Block all write operations for the "should block X" tests
+  process.env.ALLOW_INSERT_OPERATION = "false";
+  process.env.ALLOW_UPDATE_OPERATION = "false";
+  process.env.ALLOW_DELETE_OPERATION = "false";
+  process.env.ALLOW_DDL_OPERATION = "false";
+  // Pin a database so we're not in multi-DB mode (which force-disables all writes)
+  process.env.MYSQL_DB = "test_unit_db";
+  process.env.MULTI_DB_WRITE_MODE = "false";
+  // Disable SSL to skip the strict SSL validation at import time
+  process.env.MYSQL_SSL = "false";
+});
+
 import {
   executeQuery,
   executeReadOnlyQuery,
   executeWriteQuery,
 } from "../../dist/src/db/index.js";
-
-// Mock environment variables for write operation flags
-vi.stubEnv("ALLOW_INSERT_OPERATION", "false");
-vi.stubEnv("ALLOW_UPDATE_OPERATION", "false");
-vi.stubEnv("ALLOW_DELETE_OPERATION", "false");
 
 // Mock mysql2/promise
 vi.mock("mysql2/promise", () => {
@@ -109,15 +122,13 @@ describe("Query Functions", () => {
       );
       expect(mockConnection.release).toHaveBeenCalled();
 
-      expect(result).toEqual({
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(mockResults, null, 2),
-          },
-        ],
-        isError: false,
+      expect(result.isError).toBe(false);
+      expect(result.content[0]).toEqual({
+        type: "text",
+        text: JSON.stringify(mockResults, null, 2),
       });
+      // Second content item is the execution time (e.g. "Query execution time: 0.42 ms")
+      expect(result.content[1].text).toMatch(/Query execution time: [\d.]+ ms/);
     });
 
     it("should block INSERT operations when not allowed", async () => {
