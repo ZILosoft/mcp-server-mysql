@@ -7,24 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
-
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: ""
-          MYSQL_ALLOW_EMPTY_PASSWORD: yes
-          MYSQL_DATABASE: mcp_test
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=3
-
     steps:
       - uses: actions/checkout@v4
 
@@ -40,10 +24,16 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: pnpm eslint
+        run: pnpm lint:eslint
 
       - name: Build
         run: pnpm build
+
+      # Runs the full suite (unit + integration + e2e) against a fresh MySQL
+      # spun up via docker-compose.test.yml — same path as `pnpm test:docker`
+      # locally, so CI behaviour matches a developer's machine.
+      - name: Run tests (dockerized MySQL)
+        run: pnpm test:docker
