@@ -569,22 +569,49 @@ When `MYSQL_CONNECTION_STRING` is provided, it takes precedence over individual 
 
 ### Security Configuration
 
-- `MYSQL_RATE_LIMIT`: Maximum queries per minute (default: "100")
-- `MYSQL_MAX_QUERY_COMPLEXITY`: Maximum query complexity score (default: "1000")
-- `MYSQL_SSL`: Enable SSL/TLS encryption (default: "false")
-- `MYSQL_SSL_CA`: Path to SSL CA certificate file (PEM format). Only used when `MYSQL_SSL=true`. Required for connecting to MySQL instances with self-signed certificates or custom CAs.
-- `MYSQL_SSL_CERT`: Path to the client certificate file (PEM format) for mTLS. Only used when `MYSQL_SSL=true`. Enables mutual TLS (mTLS) authentication, where both the server and client present certificates. Required by some database configurations that enforce client certificate verification.
-- `MYSQL_SSL_KEY`: Path to the client private key file (PEM format) for mTLS. Only used when `MYSQL_SSL=true`. Must correspond to the certificate specified by `MYSQL_SSL_CERT`.
-- `ALLOW_INSERT_OPERATION`: Enable INSERT operations (default: "false")
-- `ALLOW_UPDATE_OPERATION`: Enable UPDATE operations (default: "false")
-- `ALLOW_DELETE_OPERATION`: Enable DELETE operations (default: "false")
-- `ALLOW_DDL_OPERATION`: Enable DDL operations (default: "false")
-- `MYSQL_DISABLE_READ_ONLY_TRANSACTIONS`: **[NEW]** Disable read-only transaction enforcement (default: "false") ⚠️ **Security Warning:** Only enable this if you need full write capabilities and trust the LLM with your database
-- `SCHEMA_INSERT_PERMISSIONS`: Schema-specific INSERT permissions
-- `SCHEMA_UPDATE_PERMISSIONS`: Schema-specific UPDATE permissions
-- `SCHEMA_DELETE_PERMISSIONS`: Schema-specific DELETE permissions
-- `SCHEMA_DDL_PERMISSIONS`: Schema-specific DDL permissions
-- `MULTI_DB_WRITE_MODE`: Enable write operations in multi-DB mode (default: "false")
+#### SSL / TLS (updated in this fork)
+
+This fork introduces **SSL auto-detection with strict verification**. The behaviour is:
+
+1. If `MYSQL_SSL` is explicitly set (`"true"` or `"false"`) — the server respects it.
+2. If the connection is a Unix socket — SSL is not used.
+3. If the host is `localhost` / `127.0.0.1` / `::1` / `0.0.0.0` — SSL is not used.
+4. Otherwise (remote host) — **SSL is auto-enabled**.
+
+When SSL is active (by any path above), the server **refuses to start** unless one of these is explicitly set:
+
+- `MYSQL_SSL_CA=/path/to/ca.pem` — enables strict certificate verification (recommended)
+- `MYSQL_SSL_SKIP_VERIFY=true` — disables certificate verification (⚠️ MITM-vulnerable, not recommended for production)
+
+This prevents the common footgun where SSL gives encryption without authentication. See the **"Startup error: SSL is enabled but no CA…"** entry in the [Troubleshooting](#troubleshooting) section below for a full resolution guide.
+
+| Variable | Description |
+|---|---|
+| `MYSQL_SSL` | `"true"` / `"false"` to override auto-detection. Leave unset to let the server decide based on host. |
+| `MYSQL_SSL_CA` | Path to CA certificate (PEM). Enables verified TLS when SSL is active. |
+| `MYSQL_SSL_SKIP_VERIFY` | Set to `"true"` to explicitly disable certificate verification. Required instead of `MYSQL_SSL_CA` if you don't have a CA. |
+| `MYSQL_SSL_REJECT_UNAUTHORIZED` | Legacy alias — `"false"` is equivalent to `MYSQL_SSL_SKIP_VERIFY=true`. Prefer the new variable in new configs. |
+| `MYSQL_SSL_CERT` | Client certificate (PEM) for mTLS. Requires `MYSQL_SSL_KEY`. |
+| `MYSQL_SSL_KEY` | Client private key (PEM) for mTLS. Must match `MYSQL_SSL_CERT`. |
+
+Connection strings (`MYSQL_CONNECTION_STRING`) also understand `--ssl`, `--ssl-mode=REQUIRED|DISABLED|VERIFY_CA|…`, and `--ssl-ca=/path`.
+
+#### Write operations and permissions
+
+| Variable | Default | Description |
+|---|---|---|
+| `ALLOW_INSERT_OPERATION` | `"false"` | Allow `INSERT` queries |
+| `ALLOW_UPDATE_OPERATION` | `"false"` | Allow `UPDATE` queries |
+| `ALLOW_DELETE_OPERATION` | `"false"` | Allow `DELETE` queries |
+| `ALLOW_DDL_OPERATION` | `"false"` | Allow DDL (`CREATE`/`ALTER`/`DROP`/`TRUNCATE`) |
+| `SCHEMA_INSERT_PERMISSIONS` | *(empty)* | Per-schema INSERT overrides, e.g. `dev:true,prod:false` |
+| `SCHEMA_UPDATE_PERMISSIONS` | *(empty)* | Per-schema UPDATE overrides |
+| `SCHEMA_DELETE_PERMISSIONS` | *(empty)* | Per-schema DELETE overrides |
+| `SCHEMA_DDL_PERMISSIONS` | *(empty)* | Per-schema DDL overrides |
+| `MULTI_DB_WRITE_MODE` | `"false"` | **Hard safety lock**: in multi-DB mode (no `MYSQL_DB` set), writes are force-disabled regardless of the `ALLOW_*` flags unless this is `"true"`. This is now actually enforced (not just logged) as of this fork. |
+| `MYSQL_DISABLE_READ_ONLY_TRANSACTIONS` | `"false"` | Disable `SET SESSION TRANSACTION READ ONLY` for SELECT queries. ⚠️ Only set if you need DDL support and trust the LLM. |
+| `MYSQL_RATE_LIMIT` | `"100"` | *(reserved — not currently enforced in code)* |
+| `MYSQL_MAX_QUERY_COMPLEXITY` | `"1000"` | *(reserved — not currently enforced in code)* |
 
 ### Timezone and Date Configuration
 
@@ -715,26 +742,68 @@ OPENAI_API_KEY=your-key  npx mcp-eval evals.ts index.ts
 
 ### Common Issues
 
-1. **Connection Issues**
+1. **Startup error: SSL is enabled but no CA…**
+
+   If the server refuses to start with:
+
+   ```text
+   SSL is enabled but neither a CA certificate nor a skip-verify flag is set.
+     - Provide MYSQL_SSL_CA=/path/to/ca.pem for secure verified connections, OR
+     - Set MYSQL_SSL_SKIP_VERIFY=true to explicitly disable certificate verification
+       (NOT recommended for production — vulnerable to MITM attacks).
+   ```
+
+   …it's because your `MYSQL_HOST` is not local, so SSL was auto-enabled, but you haven't told the server how to verify the server's certificate. You have three options, in order of preference:
+
+   **Option A — provide a CA certificate (recommended)**
+
+   ```json
+   "env": {
+     "MYSQL_HOST": "db.internal.example",
+     "MYSQL_SSL_CA": "/etc/ssl/mysql/ca.pem"
+   }
+   ```
+
+   **Option B — skip verification (encrypted but MITM-vulnerable)**
+
+   ```json
+   "env": {
+     "MYSQL_HOST": "db.internal.example",
+     "MYSQL_SSL_SKIP_VERIFY": "true"
+   }
+   ```
+
+   **Option C — disable SSL entirely (only for trusted networks like SSH tunnels)**
+
+   ```json
+   "env": {
+     "MYSQL_HOST": "db.internal.example",
+     "MYSQL_SSL": "false"
+   }
+   ```
+
+   If you're using an SSH tunnel or 1Password `op` wrapper, the actual host the server sees after substitution might be `127.0.0.1` (tunnel endpoint) — in that case SSL won't auto-enable and you don't need any of these flags.
+
+2. **Connection Issues**
    - Verify MySQL server is running and accessible
    - Check credentials and permissions
    - Ensure SSL/TLS configuration is correct if enabled
    - Try connecting with a MySQL client to confirm access
 
-2. **Performance Issues**
+3. **Performance Issues**
    - Adjust connection pool size
    - Configure query timeout values
    - Enable query caching if needed
    - Check query complexity settings
    - Monitor server resource usage
 
-3. **Security Restrictions**
+4. **Security Restrictions**
    - Review rate limiting configuration
    - Check query whitelist/blacklist settings
    - Verify SSL/TLS settings
    - Ensure the user has appropriate MySQL permissions
 
-4. **Path Resolution**
+5. **Path Resolution**
    If you encounter an error "Could not connect to MCP server mcp-server-mysql", explicitly set the path of all required binaries:
 
    ```json
@@ -760,7 +829,7 @@ OPENAI_API_KEY=your-key  npx mcp-eval evals.ts index.ts
    echo "$(which node)/../../lib/node_modules"
    ```
 
-5. **Claude Desktop Specific Issues**
+6. **Claude Desktop Specific Issues**
    - If you see "Server disconnected" logs in Claude Desktop, check the logs at `~/Library/Logs/Claude/mcp-server-mcp_server_mysql.log`
    - Ensure you're using the absolute path to both the Node binary and the server script
    - Check if your `.env` file is being properly loaded; use explicit environment variables in the configuration
@@ -798,7 +867,7 @@ OPENAI_API_KEY=your-key  npx mcp-eval evals.ts index.ts
      }
      ```
 
-6. **Authentication Issues**
+7. **Authentication Issues**
    - For MySQL 8.0+, ensure the server supports the `caching_sha2_password` authentication plugin
    - Check if your MySQL user is configured with the correct authentication method
    - Try creating a user with legacy authentication if needed:
@@ -809,7 +878,7 @@ OPENAI_API_KEY=your-key  npx mcp-eval evals.ts index.ts
 
      @lizhuangs
 
-7. I am encountering `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'dotenv' imported from` error
+8. I am encountering `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'dotenv' imported from` error
    try this workaround:
 
    ```bash
