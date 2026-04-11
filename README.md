@@ -1,15 +1,28 @@
-# MCP Server for MySQL - Claude Code Edition
+# MCP Server for MySQL - Security-Hardened Fork
 
-> **🚀 This is a modified version optimized for Claude Code with SSH tunnel support**  
-> **Original Author:** [@benborla29](https://github.com/benborla)  
-> **Original Repository:** [https://github.com/benborla/mcp-server-mysql](https://github.com/benborla/mcp-server-mysql)  
-> **License:** MIT  
+> **🔒 Security-hardened fork of [@benborla29/mcp-server-mysql](https://github.com/benborla/mcp-server-mysql)**
+> **Package:** `@zilosoft/mcp-server-mysql`
+> **Original Author:** [@benborla29](https://github.com/benborla)
+> **Original Repository:** [https://github.com/benborla/mcp-server-mysql](https://github.com/benborla/mcp-server-mysql)
+> **Fork Maintainer:** [@ZILosoft](https://github.com/ZILosoft)
+> **License:** MIT
 
 ## MCP Server for MySQL based on NodeJS
 
 [![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/benborla/mcp-server-mysql)](https://archestra.ai/mcp-catalog/benborla__mcp-server-mysql)
 
-### Key Features of This Fork
+### Security Fixes in This Fork
+
+- 🔒 **Constant-time Bearer token comparison** — prevents timing attacks on the remote MCP secret
+- 🔒 **Strict SSL validation** — at startup the server requires either a CA certificate (`MYSQL_SSL_CA`) or explicit opt-out (`MYSQL_SSL_SKIP_VERIFY=true`); no more silent MITM-vulnerable encryption
+- 🔒 **SSL auto-detection** — remote hosts automatically get SSL enabled; localhost/sockets skip it
+- 🔒 **AST-based schema extraction** — replaces regex-only parser; fixes permission bypass via cross-database references like `INSERT INTO forbidden_db.users`
+- 🔒 **Removed `mysql_clear_password` plaintext auth plugin**
+- 🔒 **Enforced multi-DB write lockdown** — in multi-DB mode, writes are truly disabled unless `MULTI_DB_WRITE_MODE=true`
+- 🔒 **Zod input validation** on the `mysql_query` tool parameter
+- 🔒 **Masked SSL file paths** in startup logs
+
+### Key Features (inherited from upstream)
 
 - ✅ **Claude Code Integration** - Optimized for use with Anthropic's Claude Code CLI
 - ✅ **SSH Tunnel Support** - Built-in support for SSH tunnels to remote databases
@@ -51,11 +64,17 @@ A Model Context Protocol server that provides access to MySQL databases through 
 
 ## Installation
 
-### Using Smithery
+> **Note:** This security-hardened fork is published as `@zilosoft/mcp-server-mysql`.
+> The Smithery and Cursor one-click installs below point to the original upstream
+> `@benborla29/mcp-server-mysql` package, which does NOT include the security fixes
+> from this fork. To get the hardened build, install `@zilosoft/mcp-server-mysql`
+> via npm/pnpm as shown in the other sections.
+
+### Using Smithery (upstream only — no security fixes)
 
 There are several ways to install and configure the MCP server but the most common would be checking this website [https://smithery.ai/server/@benborla29/mcp-server-mysql](https://smithery.ai/server/@benborla29/mcp-server-mysql)
 
-### Cursor
+### Cursor (upstream only — no security fixes)
 
 For Cursor IDE, you can install this MCP server with the following command in your project:
 
@@ -78,7 +97,7 @@ codex mcp add mcp_server_mysql \
   --env ALLOW_INSERT_OPERATION="false" \
   --env ALLOW_UPDATE_OPERATION="false" \
   --env ALLOW_DELETE_OPERATION="false" \
-  -- npx -y @benborla29/mcp-server-mysql
+  -- npx -y @zilosoft/mcp-server-mysql
 ```
 
 ### Claude Code
@@ -101,10 +120,10 @@ First, install the package globally:
 
 ```bash
 # Using npm
-npm install -g @benborla29/mcp-server-mysql
+npm install -g @zilosoft/mcp-server-mysql
 
 # Using pnpm
-pnpm add -g @benborla29/mcp-server-mysql
+pnpm add -g @zilosoft/mcp-server-mysql
 ```
 
 Then add the server to Claude Code:
@@ -119,7 +138,7 @@ claude mcp add mcp_server_mysql \
   -e ALLOW_INSERT_OPERATION="false" \
   -e ALLOW_UPDATE_OPERATION="false" \
   -e ALLOW_DELETE_OPERATION="false" \
-  -- npx @benborla29/mcp-server-mysql
+  -- npx @zilosoft/mcp-server-mysql
 ```
 
 **Using Local Repository (for development):**
@@ -160,7 +179,7 @@ claude mcp add mcp_server_mysql \
   -e ALLOW_INSERT_OPERATION="false" \
   -e ALLOW_UPDATE_OPERATION="false" \
   -e ALLOW_DELETE_OPERATION="false" \
-  -- npx @benborla29/mcp-server-mysql
+  -- npx @zilosoft/mcp-server-mysql
 ```
 
 #### Choosing the Right Scope
@@ -206,7 +225,7 @@ claude mcp add mcp_server_mysql_multi \
   -e MYSQL_USER="root" \
   -e MYSQL_PASS="your_password" \
   -e MULTI_DB_WRITE_MODE="false" \
-  -- npx @benborla29/mcp-server-mysql
+  -- npx @zilosoft/mcp-server-mysql
 ```
 
 #### Advanced Configuration
@@ -229,7 +248,7 @@ claude mcp add mcp_server_mysql \
   -e ALLOW_UPDATE_OPERATION="false" \
   -e ALLOW_DELETE_OPERATION="false" \
   -e MYSQL_ENABLE_LOGGING="true" \
-  -- npx @benborla29/mcp-server-mysql
+  -- npx @zilosoft/mcp-server-mysql
 ```
 
 #### Troubleshooting Claude Code Setup
@@ -255,7 +274,7 @@ claude mcp add mcp_server_mysql \
 
    ```bash
    # Test the server directly
-   npx @benborla29/mcp-server-mysql
+   npx @zilosoft/mcp-server-mysql
    ```
 
 ### Using NPM/PNPM
@@ -264,10 +283,10 @@ For manual installation:
 
 ```bash
 # Using npm
-npm install -g @benborla29/mcp-server-mysql
+npm install -g @zilosoft/mcp-server-mysql
 
 # Using pnpm
-pnpm add -g @benborla29/mcp-server-mysql
+pnpm add -g @zilosoft/mcp-server-mysql
 ```
 
 After manual installation, you'll need to configure your LLM application to use the MCP server (see Configuration section below).
@@ -367,7 +386,7 @@ To run in remote mode, you'll need to provide [environment variables](https://gi
 8. Run the server
 
    ```bash
-   npx @benborla29/mcp-server-mysql
+   npx @zilosoft/mcp-server-mysql
    ```
 
 9. Configure your agent to connect to the MCP with the next configuration:
@@ -474,7 +493,7 @@ For more control over the MCP server's behavior, you can use these advanced conf
       "command": "/path/to/npx/binary/npx",
       "args": [
         "-y",
-        "@benborla29/mcp-server-mysql"
+        "@zilosoft/mcp-server-mysql"
       ],
       "env": {
         // Basic connection settings
@@ -789,7 +808,7 @@ OPENAI_API_KEY=your-key  npx mcp-eval evals.ts index.ts
    try this workaround:
 
    ```bash
-   npx -y -p @benborla29/mcp-server-mysql -p dotenv mcp-server-mysql
+   npx -y -p @zilosoft/mcp-server-mysql -p dotenv mcp-server-mysql
    ```
 
    Thanks to @lizhuangs

@@ -1,9 +1,20 @@
 {
-  "name": "@benborla29/mcp-server-mysql",
+  "name": "@zilosoft/mcp-server-mysql",
   "version": "2.0.8",
-  "description": "MCP server for interacting with MySQL databases with write operations support",
+  "description": "MCP server for interacting with MySQL databases with write operations support (security-hardened fork with SSL auto-detection, AST-based permission checks, and hardened remote mode)",
   "license": "MIT",
   "author": "Ben Borla (https://github.com/benborla)",
+  "contributors": [
+    "ZILosoft (https://github.com/ZILosoft)"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZILosoft/mcp-server-mysql.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ZILosoft/mcp-server-mysql/issues"
+  },
+  "homepage": "https://github.com/ZILosoft/mcp-server-mysql#readme",
   "type": "module",
   "main": "dist/index.js",
   "module": "index.ts",
@@ -14,7 +25,7 @@
   "files": [
     "dist",
     "README.md",
-    "assets"
+    "LICENSE.md"
   ],
   "scripts": {
     "start": "node dist/index.js",

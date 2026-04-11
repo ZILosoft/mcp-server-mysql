@@ -1,13 +1,36 @@
 name: NPM Publish
 
 on:
+  # Manual trigger from the Actions UI
   workflow_dispatch:
+  # Triggered when a GitHub Release is published
   release:
     types: [created]
+  # Triggered on version tag push (e.g. `git tag v2.0.9 && git push --tags`)
+  push:
+    tags:
+      - "v*"
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Hard restriction: only this GitHub user can run the publish job.
+    # Even if someone else has write access and tries to trigger the workflow,
+    # the job will exit immediately because github.actor won't match.
+    if: github.actor == 'ZILosoft'
+    # Deploy into a protected environment. Configure the `npm-publish` environment
+    # in repo Settings → Environments with:
+    #   - Required reviewers: ZILosoft
+    #   - Deployment branches: only protected branches / tags matching v*
+    #   - Environment secret: NPM_TOKEN (stored here instead of repo-level)
+    environment:
+      name: npm-publish
+      url: https://www.npmjs.com/package/@zilosoft/mcp-server-mysql
+    # Required for npm provenance (cryptographically links the published package
+    # to this GitHub repo + commit, visible on npmjs.com)
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -24,12 +47,22 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build
         run: pnpm build
 
+      - name: Verify tag matches package version
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
+            exit 1
+          fi
+
       - name: Publish to NPM
-        run: pnpm publish --no-git-checks
+        run: npm publish --access public --provenance --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
