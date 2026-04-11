@@ -99,6 +99,28 @@ const dbFromEnvOrConnString = connectionStringConfig.database || process.env.MYS
 export const isMultiDbMode =
   !dbFromEnvOrConnString || dbFromEnvOrConnString.trim() === "";
 
+// Auto-detect whether SSL should be enabled.
+// Rules (in priority order):
+//   1. MYSQL_SSL explicitly set → respect it
+//   2. Unix socket connection → no SSL needed
+//   3. Host is localhost/loopback → no SSL needed
+//   4. Remote host → enable SSL automatically
+function shouldAutoEnableSSL(): boolean {
+  if (process.env.MYSQL_SSL !== undefined) {
+    return process.env.MYSQL_SSL === "true";
+  }
+  if (connectionStringConfig.socketPath || process.env.MYSQL_SOCKET_PATH) {
+    return false;
+  }
+  const host = connectionStringConfig.host || process.env.MYSQL_HOST || "127.0.0.1";
+  const localHosts = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
+  return !localHosts.has(host.toLowerCase());
+}
+
+export const IS_SSL_ENABLED = shouldAutoEnableSSL();
+// True when SSL was not explicitly configured but auto-detected as needed
+export const IS_SSL_AUTO_DETECTED = process.env.MYSQL_SSL === undefined && IS_SSL_ENABLED;
+
 export const mcpConfig = {
   server: {
     name: "@benborla29/mcp-server-mysql",
@@ -129,17 +151,7 @@ export const mcpConfig = {
     enableKeepAlive: true,
     keepAliveInitialDelay: 0,
     connectTimeout: process.env.MYSQL_CONNECT_TIMEOUT ? parseInt(process.env.MYSQL_CONNECT_TIMEOUT, 10) : 10000,
-    authPlugins: {
-      mysql_clear_password: () => () =>
-        Buffer.from(
-          connectionStringConfig.password !== undefined
-            ? connectionStringConfig.password
-            : process.env.MYSQL_PASS !== undefined
-              ? process.env.MYSQL_PASS
-              : ""
-        ),
-    },
-    ...(process.env.MYSQL_SSL === "true"
+    ...(IS_SSL_ENABLED
       ? {
           ssl: {
             rejectUnauthorized:

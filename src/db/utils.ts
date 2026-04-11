@@ -5,7 +5,7 @@ import SqlParser, { AST } from "node-sql-parser";
 const { Parser } = SqlParser;
 const parser = new Parser();
 
-// Extract schema from SQL query
+// Extract schema from SQL query using AST parser for accuracy
 function extractSchemaFromQuery(sql: string): string | null {
   // Default schema from environment
   const defaultSchema = process.env.MYSQL_DB || null;
@@ -15,21 +15,38 @@ function extractSchemaFromQuery(sql: string): string | null {
     return defaultSchema;
   }
 
-  // Try to extract schema from query
+  try {
+    const astOrArray: AST | AST[] = parser.astify(sql, { database: "mysql" });
+    const statements = Array.isArray(astOrArray) ? astOrArray : [astOrArray];
 
-  // Case 1: USE database statement
-  const useMatch = sql.match(/USE\s+`?([a-zA-Z0-9_]+)`?/i);
-  if (useMatch && useMatch[1]) {
-    return useMatch[1];
+    for (const stmt of statements) {
+      // INSERT/UPDATE: target table has the primary schema
+      if ("table" in stmt && stmt.table) {
+        const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
+        for (const t of tables) {
+          if (t && typeof t === "object" && "db" in t && t.db) {
+            return t.db as string;
+          }
+        }
+      }
+      // SELECT/DELETE: schema comes from FROM clause
+      if ("from" in stmt && stmt.from) {
+        const froms = Array.isArray(stmt.from) ? stmt.from : [stmt.from];
+        for (const t of froms) {
+          if (t && typeof t === "object" && "db" in t && t.db) {
+            return t.db as string;
+          }
+        }
+      }
+    }
+  } catch {
+    // Fall back to regex on parse failure (e.g. USE statements, non-standard syntax)
+    const useMatch = sql.match(/USE\s+`?([a-zA-Z0-9_]+)`?/i);
+    if (useMatch?.[1]) return useMatch[1];
+    const dbTableMatch = sql.match(/`?([a-zA-Z0-9_]+)`?\.`?[a-zA-Z0-9_]+`?/i);
+    if (dbTableMatch?.[1]) return dbTableMatch[1];
   }
 
-  // Case 2: database.table notation
-  const dbTableMatch = sql.match(/`?([a-zA-Z0-9_]+)`?\.`?[a-zA-Z0-9_]+`?/i);
-  if (dbTableMatch && dbTableMatch[1]) {
-    return dbTableMatch[1];
-  }
-
-  // Return default if we couldn't find a schema in the query
   return defaultSchema;
 }
 

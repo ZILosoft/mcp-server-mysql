@@ -27,6 +27,8 @@ import {
   IS_REMOTE_MCP,
   REMOTE_SECRET_KEY,
   PORT,
+  IS_SSL_ENABLED,
+  IS_SSL_AUTO_DETECTED,
 } from "./src/config/index.js";
 import {
   safeExit,
@@ -42,6 +44,14 @@ import { realpathSync } from 'fs';
 
 
 log("info", `Starting MySQL MCP server v${version}...`);
+
+if (IS_SSL_AUTO_DETECTED) {
+  log(
+    "info",
+    "SSL auto-detected: remote host detected, enabling SSL automatically. " +
+    "Set MYSQL_SSL=false to override, or MYSQL_SSL_REJECT_UNAUTHORIZED=true to enforce certificate validation.",
+  );
+}
 
 // Update tool description to include multi-DB mode and schema-specific permissions
 const toolVersion = `MySQL MCP Server [v${process.env.npm_package_version}]`;
@@ -119,10 +129,14 @@ log(
       user: config.mysql.user,
       password: config.mysql.password ? "******" : "not set",
       database: config.mysql.database || "MULTI_DB_MODE",
-      ssl: process.env.MYSQL_SSL === "true" ? "enabled" : "disabled",
-      sslCA: process.env.MYSQL_SSL_CA || "not set",
-      sslCert: process.env.MYSQL_SSL_CERT || "not set",
-      sslKey: process.env.MYSQL_SSL_KEY || "not set",
+      ssl: IS_SSL_ENABLED
+        ? IS_SSL_AUTO_DETECTED
+          ? "enabled (auto-detected: remote host)"
+          : "enabled (explicit)"
+        : "disabled",
+      sslCA: process.env.MYSQL_SSL_CA ? "set" : "not set",
+      sslCert: process.env.MYSQL_SSL_CERT ? "set" : "not set",
+      sslKey: process.env.MYSQL_SSL_KEY ? "set" : "not set",
       multiDbMode: isMultiDbMode ? "enabled" : "disabled",
     },
     null,
@@ -291,7 +305,14 @@ export default function createMcpServer({
         throw new Error(`Unknown tool: ${request.params.name}`);
       }
 
-      const sql = request.params.arguments?.sql as string;
+      const sqlValidation = z.string().min(1, "sql must be a non-empty string").safeParse(request.params.arguments?.sql);
+      if (!sqlValidation.success) {
+        return {
+          content: [{ type: "text", text: `Error: ${sqlValidation.error.errors[0].message}` }],
+          isError: true,
+        };
+      }
+      const sql = sqlValidation.data;
       return await executeReadOnlyQuery(sql);
     } catch (err) {
       const error = err as Error;
@@ -450,11 +471,7 @@ if (isMainModule()) {
           // In stateless mode, create a new instance of transport and server for each request
           // to ensure complete isolation. A single instance would cause request ID collisions
           // when multiple clients connect concurrently.
-          if (
-            !req.get("Authorization") ||
-            !req.get("Authorization")?.startsWith("Bearer ") ||
-            !req.get("Authorization")?.endsWith(REMOTE_SECRET_KEY)
-          ) {
+          if (req.get("Authorization") !== `Bearer ${REMOTE_SECRET_KEY}`) {
             console.error("Missing or invalid Authorization header");
             res.status(401).json({
               jsonrpc: "2.0",
