@@ -51,6 +51,9 @@ export interface MySQLConnectionConfig {
   password?: string;
   database?: string;
   socketPath?: string;
+  ssl?: boolean;
+  sslCA?: string;
+  sslMode?: string;
 }
 
 // Function to parse MySQL connection string (mysql CLI format)
@@ -159,6 +162,23 @@ export function parseMySQLConnectionString(
           break;
         case 'socket':
           config.socketPath = value;
+          break;
+        case 'ssl':
+          // --ssl or --ssl=true → enabled; --ssl=false/0 → disabled
+          config.ssl = value === '' ? true : (value !== 'false' && value !== '0');
+          break;
+        case 'ssl-mode': {
+          // REQUIRED, PREFERRED, VERIFY_CA, VERIFY_IDENTITY → enabled
+          // DISABLED → disabled
+          const mode = value.toUpperCase();
+          config.sslMode = mode;
+          config.ssl = mode !== 'DISABLED';
+          break;
+        }
+        case 'ssl-ca':
+          config.sslCA = value;
+          // Presence of --ssl-ca implies SSL is required
+          if (config.ssl === undefined) config.ssl = true;
           break;
       }
     }

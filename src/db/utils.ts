@@ -1,19 +1,16 @@
-import { isMultiDbMode } from "./../config/index.js";
 import { log } from "./../utils/index.js";
 import SqlParser, { AST } from "node-sql-parser";
 
 const { Parser } = SqlParser;
 const parser = new Parser();
 
-// Extract schema from SQL query using AST parser for accuracy
+// Extract schema from SQL query using AST parser for accuracy.
+// Always parses the query to catch cross-database references even in single-DB mode:
+// with MYSQL_DB=allowed_db, a query like `INSERT INTO forbidden_db.users` must return
+// "forbidden_db" so permission checks see the real target, not the pinned default.
 function extractSchemaFromQuery(sql: string): string | null {
-  // Default schema from environment
+  // Default schema from environment (fallback if query doesn't specify one)
   const defaultSchema = process.env.MYSQL_DB || null;
-
-  // If we have a default schema and not in multi-DB mode, return it
-  if (defaultSchema && !isMultiDbMode) {
-    return defaultSchema;
-  }
 
   try {
     const astOrArray: AST | AST[] = parser.astify(sql, { database: "mysql" });

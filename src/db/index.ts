@@ -13,9 +13,14 @@ import * as mysql2 from "mysql2/promise";
 import { log } from "./../utils/index.js";
 import { mcpConfig as config, MYSQL_DISABLE_READ_ONLY_TRANSACTIONS } from "./../config/index.js";
 
-// Force read-only mode in multi-DB mode unless explicitly configured otherwise
+// Inform the user when multi-DB mode is forcing read-only.
+// The actual enforcement happens in src/config/index.ts via ALLOW_*_OPERATION flags.
 if (isMultiDbMode && process.env.MULTI_DB_WRITE_MODE !== "true") {
-  log("error", "Multi-DB mode detected - enabling read-only mode for safety");
+  log(
+    "info",
+    "Multi-DB mode detected - all write operations are disabled. " +
+    "Set MULTI_DB_WRITE_MODE=true to allow writes (not recommended).",
+  );
 }
 
 // @INFO: Check if running in test mode

@@ -65,14 +65,24 @@ if (process.env.NODE_ENV === "test" && !process.env.MYSQL_DB) {
   process.env.MYSQL_DB = "mcp_test_db"; // @INFO: Ensure we have a database name for tests
 }
 
-// Write operation flags (global defaults)
+// Multi-DB mode safety: when no database is pinned, writes are blocked unless
+// the operator explicitly opts in with MULTI_DB_WRITE_MODE=true.
+const dbFromEnvOrConnStringEarly = connectionStringConfig.database || process.env.MYSQL_DB;
+const isMultiDbModeEarly =
+  !dbFromEnvOrConnStringEarly || dbFromEnvOrConnStringEarly.trim() === "";
+const MULTI_DB_WRITE_MODE = process.env.MULTI_DB_WRITE_MODE === "true";
+const multiDbBlocksWrites = isMultiDbModeEarly && !MULTI_DB_WRITE_MODE;
+
+// Write operation flags (global defaults).
+// In multi-DB mode without MULTI_DB_WRITE_MODE=true, all writes are force-disabled.
 export const ALLOW_INSERT_OPERATION =
-  process.env.ALLOW_INSERT_OPERATION === "true";
+  !multiDbBlocksWrites && process.env.ALLOW_INSERT_OPERATION === "true";
 export const ALLOW_UPDATE_OPERATION =
-  process.env.ALLOW_UPDATE_OPERATION === "true";
+  !multiDbBlocksWrites && process.env.ALLOW_UPDATE_OPERATION === "true";
 export const ALLOW_DELETE_OPERATION =
-  process.env.ALLOW_DELETE_OPERATION === "true";
-export const ALLOW_DDL_OPERATION = process.env.ALLOW_DDL_OPERATION === "true";
+  !multiDbBlocksWrites && process.env.ALLOW_DELETE_OPERATION === "true";
+export const ALLOW_DDL_OPERATION =
+  !multiDbBlocksWrites && process.env.ALLOW_DDL_OPERATION === "true";
 
 // Transaction mode control
 export const MYSQL_DISABLE_READ_ONLY_TRANSACTIONS = 
@@ -95,17 +105,19 @@ export const REMOTE_SECRET_KEY = process.env.REMOTE_SECRET_KEY || "";
 export const PORT = process.env.PORT || 3000;
 
 // Check if we're in multi-DB mode (no specific DB set)
-const dbFromEnvOrConnString = connectionStringConfig.database || process.env.MYSQL_DB;
-export const isMultiDbMode =
-  !dbFromEnvOrConnString || dbFromEnvOrConnString.trim() === "";
+export const isMultiDbMode = isMultiDbModeEarly;
 
 // Auto-detect whether SSL should be enabled.
 // Rules (in priority order):
-//   1. MYSQL_SSL explicitly set → respect it
-//   2. Unix socket connection → no SSL needed
-//   3. Host is localhost/loopback → no SSL needed
-//   4. Remote host → enable SSL automatically
+//   1. Connection string explicitly configures SSL → respect it
+//   2. MYSQL_SSL env var explicitly set → respect it
+//   3. Unix socket connection → no SSL needed
+//   4. IPv4/IPv6 loopback or localhost → no SSL needed
+//   5. Any other host (remote) → enable SSL automatically
 function shouldAutoEnableSSL(): boolean {
+  if (connectionStringConfig.ssl !== undefined) {
+    return connectionStringConfig.ssl;
+  }
   if (process.env.MYSQL_SSL !== undefined) {
     return process.env.MYSQL_SSL === "true";
   }
@@ -113,13 +125,50 @@ function shouldAutoEnableSSL(): boolean {
     return false;
   }
   const host = connectionStringConfig.host || process.env.MYSQL_HOST || "127.0.0.1";
-  const localHosts = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
+  const localHosts = new Set([
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    "0:0:0:0:0:0:0:1",
+    "0.0.0.0",
+    "[::1]",
+  ]);
   return !localHosts.has(host.toLowerCase());
 }
 
 export const IS_SSL_ENABLED = shouldAutoEnableSSL();
 // True when SSL was not explicitly configured but auto-detected as needed
-export const IS_SSL_AUTO_DETECTED = process.env.MYSQL_SSL === undefined && IS_SSL_ENABLED;
+export const IS_SSL_AUTO_DETECTED =
+  process.env.MYSQL_SSL === undefined &&
+  connectionStringConfig.ssl === undefined &&
+  IS_SSL_ENABLED;
+
+// Effective SSL CA path: connection string takes precedence, then env var
+const effectiveSSLCA = connectionStringConfig.sslCA || process.env.MYSQL_SSL_CA;
+
+// Skip SSL certificate verification.
+// Two equivalent opt-outs (legacy MYSQL_SSL_REJECT_UNAUTHORIZED=false for backwards compat):
+const SSL_SKIP_VERIFY =
+  process.env.MYSQL_SSL_SKIP_VERIFY === "true" ||
+  process.env.MYSQL_SSL_REJECT_UNAUTHORIZED === "false";
+
+export const IS_SSL_SKIP_VERIFY = IS_SSL_ENABLED && SSL_SKIP_VERIFY;
+
+// When SSL is active, the user MUST either provide a CA certificate for verification
+// or explicitly opt out with MYSQL_SSL_SKIP_VERIFY=true. This prevents the footgun
+// where auto-enabled SSL gives encryption without authentication (MITM vulnerable).
+if (IS_SSL_ENABLED && !effectiveSSLCA && !SSL_SKIP_VERIFY) {
+  throw new Error(
+    "SSL is enabled but neither a CA certificate nor a skip-verify flag is set.\n" +
+      "  - Provide MYSQL_SSL_CA=/path/to/ca.pem for secure verified connections, OR\n" +
+      "  - Set MYSQL_SSL_SKIP_VERIFY=true to explicitly disable certificate verification\n" +
+      "    (NOT recommended for production — vulnerable to MITM attacks).\n" +
+      (IS_SSL_AUTO_DETECTED
+        ? "SSL was auto-enabled because the host is not local. " +
+          "Set MYSQL_SSL=false to connect without encryption (also not recommended)."
+        : ""),
+  );
+}
 
 export const mcpConfig = {
   server: {
@@ -154,11 +203,12 @@ export const mcpConfig = {
     ...(IS_SSL_ENABLED
       ? {
           ssl: {
-            rejectUnauthorized:
-              process.env.MYSQL_SSL_REJECT_UNAUTHORIZED === "true",
-            // Add CA certificate if provided
-            ...(process.env.MYSQL_SSL_CA
-              ? { ca: readCACertificate(process.env.MYSQL_SSL_CA) }
+            // Default to strict verification. Only disable when user explicitly
+            // opted out via MYSQL_SSL_SKIP_VERIFY=true (or legacy REJECT_UNAUTHORIZED=false).
+            rejectUnauthorized: !SSL_SKIP_VERIFY,
+            // Add CA certificate if provided (from connection string or env var)
+            ...(effectiveSSLCA
+              ? { ca: readCACertificate(effectiveSSLCA) }
               : {}),
             // Add client certificate for mTLS if provided
             ...(process.env.MYSQL_SSL_CERT

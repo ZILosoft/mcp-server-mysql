@@ -29,6 +29,7 @@ import {
   PORT,
   IS_SSL_ENABLED,
   IS_SSL_AUTO_DETECTED,
+  IS_SSL_SKIP_VERIFY,
 } from "./src/config/index.js";
 import {
   safeExit,
@@ -41,6 +42,7 @@ import {
 import express, { Request, Response } from "express";
 import { fileURLToPath } from 'url';
 import { realpathSync } from 'fs';
+import { timingSafeEqual } from 'crypto';
 
 
 log("info", `Starting MySQL MCP server v${version}...`);
@@ -48,8 +50,16 @@ log("info", `Starting MySQL MCP server v${version}...`);
 if (IS_SSL_AUTO_DETECTED) {
   log(
     "info",
-    "SSL auto-detected: remote host detected, enabling SSL automatically. " +
-    "Set MYSQL_SSL=false to override, or MYSQL_SSL_REJECT_UNAUTHORIZED=true to enforce certificate validation.",
+    "SSL auto-detected: remote host, enabling encrypted connection. " +
+    "Set MYSQL_SSL=false to disable.",
+  );
+}
+
+if (IS_SSL_SKIP_VERIFY) {
+  log(
+    "error",
+    "WARNING: SSL certificate verification is DISABLED (MYSQL_SSL_SKIP_VERIFY=true). " +
+    "Connection is vulnerable to MITM attacks. Provide MYSQL_SSL_CA for verified SSL.",
   );
 }
 
@@ -130,9 +140,8 @@ log(
       password: config.mysql.password ? "******" : "not set",
       database: config.mysql.database || "MULTI_DB_MODE",
       ssl: IS_SSL_ENABLED
-        ? IS_SSL_AUTO_DETECTED
-          ? "enabled (auto-detected: remote host)"
-          : "enabled (explicit)"
+        ? `enabled${IS_SSL_AUTO_DETECTED ? " (auto-detected: remote host)" : ""}` +
+          `, verification: ${IS_SSL_SKIP_VERIFY ? "DISABLED" : "strict"}`
         : "disabled",
       sslCA: process.env.MYSQL_SSL_CA ? "set" : "not set",
       sslCert: process.env.MYSQL_SSL_CERT ? "set" : "not set",
@@ -308,7 +317,7 @@ export default function createMcpServer({
       const sqlValidation = z.string().min(1, "sql must be a non-empty string").safeParse(request.params.arguments?.sql);
       if (!sqlValidation.success) {
         return {
-          content: [{ type: "text", text: `Error: ${sqlValidation.error.errors[0].message}` }],
+          content: [{ type: "text", text: `Error: ${sqlValidation.error.issues[0].message}` }],
           isError: true,
         };
       }
@@ -471,7 +480,15 @@ if (isMainModule()) {
           // In stateless mode, create a new instance of transport and server for each request
           // to ensure complete isolation. A single instance would cause request ID collisions
           // when multiple clients connect concurrently.
-          if (req.get("Authorization") !== `Bearer ${REMOTE_SECRET_KEY}`) {
+          // Constant-time comparison to prevent timing attacks on the Bearer token.
+          const authHeader = req.get("Authorization") ?? "";
+          const expectedHeader = `Bearer ${REMOTE_SECRET_KEY}`;
+          const authBuf = Buffer.from(authHeader);
+          const expectedBuf = Buffer.from(expectedHeader);
+          const authValid =
+            authBuf.length === expectedBuf.length &&
+            timingSafeEqual(authBuf, expectedBuf);
+          if (!authValid) {
             console.error("Missing or invalid Authorization header");
             res.status(401).json({
               jsonrpc: "2.0",
