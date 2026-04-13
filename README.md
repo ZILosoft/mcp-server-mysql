@@ -42,6 +42,7 @@ A Model Context Protocol server that provides access to MySQL databases through 
 
 - [Requirements](#requirements)
 - [Installation](#installation)
+  - [Docker](#docker)
   - [Smithery](#using-smithery)
   - [Clone to Local Repository](#running-from-local-repository)
   - [Remote mode](#run-in-remote-mode)
@@ -63,6 +64,32 @@ A Model Context Protocol server that provides access to MySQL databases through 
 - For write operations: MySQL user with INSERT, UPDATE, and/or DELETE privileges
 
 ## Installation
+
+### Docker
+
+Pre-built Docker images are published to the GitHub Container Registry on every release:
+
+```bash
+docker pull ghcr.io/zilosoft/mcp-server-mysql:latest
+# or a specific version
+docker pull ghcr.io/zilosoft/mcp-server-mysql:2.1.0
+```
+
+Run with environment variables:
+
+```bash
+docker run --rm \
+  -e MYSQL_HOST=your-host \
+  -e MYSQL_PORT=3306 \
+  -e MYSQL_USER=your-user \
+  -e MYSQL_PASS=your-password \
+  -e MYSQL_DB=your-database \
+  ghcr.io/zilosoft/mcp-server-mysql:latest
+```
+
+Available tags: `latest`, `X.Y.Z`, `X.Y`, `X` — all pointing to the security-hardened `@zilosoft` build.
+
+---
 
 > **Note:** This security-hardened fork is published as `@zilosoft/mcp-server-mysql`.
 > The Smithery and Cursor one-click installs below point to the original upstream
